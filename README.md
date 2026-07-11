@@ -1,1 +1,1 @@
-# 6d-opose-estimation
+# 6d-object-pose-estimation
