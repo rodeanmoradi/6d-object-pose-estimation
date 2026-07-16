@@ -4,6 +4,7 @@ from PIL import Image
 import imageio.v3 as iio
 import torch
 import torchvision
+import matplotlib.pyplot as plt
 import torchvision.transforms.v2.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -36,6 +37,9 @@ class YCBVDataset(torch.utils.data.Dataset):
                 depth_scale = scene_camera[key]["depth_scale"]
 
                 for object_index, (gt, gt_info) in enumerate(zip(scene_gt[key], scene_gt_info[key])):
+                    if gt_info["visib_fract"] < 0.1:
+                        continue
+
                     sample = {
                         "obj_id": gt["obj_id"],
                         "scene_id": s.name,
@@ -72,9 +76,32 @@ class YCBVDataset(torch.utils.data.Dataset):
         rgb = F.normalize(rgb, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         item["rgb"] = rgb # Cropped, reshaped to CHW, resized, scaled, normalized, float32
 
-        depth = iio.imread(self.dataset[i]["depth"]) * self.dataset[i]["depth_scale"]
+        depth = iio.imread(self.dataset[i]["depth"])
         depth = np.array(depth)
-        item["depth"] = depth
+        depth = depth * self.dataset[i]["depth_scale"]
+        mask_visib = iio.imread(self.dataset[i]["mask_visib"])
+        mask_visib = np.array(mask_visib)
+        mask = (mask_visib > 0) & (depth > 0) # Mask is true when depth is nonzero and mask_visib is not black
+        y_im, x_im = np.nonzero(mask) # np.nonzero() returns tuple of two arrays (for each dim) where ith row col pair is masked coord
+        # Back-projection
+        cam_k = self.dataset[i]["cam_K"]
+        fx = cam_k[0]
+        cx = cam_k[2]
+        fy = cam_k[4]
+        cy = cam_k[5]
+        z = depth[y_im, x_im]
+        y_cam = ((y_im - cy) * z) / fy
+        x_cam = ((x_im - cx) * z) / fx
+        pointcloud = np.stack([x_cam, y_cam, z], axis=1) # Creates an array where each entry is a given x, y, z point
+        indices = np.random.choice(range(len(pointcloud)), 1000, replace=True) # Randomly pick 1000 indices (random sampling)
+        pointcloud = pointcloud[indices]
+        pointcloud *= 1e-3 # mm to m
+        item["pointcloud"] = torch.tensor(pointcloud, dtype=torch.float32)
+
+        item["obj_id"] = self.dataset[i]["obj_id"]
+        item["translation_m2c"] = torch.tensor(self.dataset[i]["translation_m2c"], dtype=torch.float32) * 1e-3
+        rotation_m2c = torch.tensor(self.dataset[i]["rotation_m2c"], dtype=torch.float32)
+        rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
+        item["rotation_m2c"] = rotation_m2c
 
         return item
-    
