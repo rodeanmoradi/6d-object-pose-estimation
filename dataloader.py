@@ -6,7 +6,7 @@ import torch
 import torchvision
 import matplotlib.pyplot as plt
 import torchvision.transforms.v2.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets
 from pathlib import Path
 
@@ -16,7 +16,7 @@ class YCBVDataset(torch.utils.data.Dataset):
         train_path = data_path / "train_real"
 
         self.dataset = []
-        for s in train_path.iterdir():
+        for s in sorted(train_path.iterdir()):
             rgb_path = s / "rgb"
             depth_path = s / "depth"
             mask_path = s / "mask"
@@ -105,3 +105,44 @@ class YCBVDataset(torch.utils.data.Dataset):
         item["rotation_m2c"] = rotation_m2c
 
         return item
+
+
+def get_relevant_indices(ds):
+    #Train/val/test split: 64/16/12 scenes (70%/17%/13%); Train: scenes [0-47], [60-75], Val: [76-91], Test: [48-59]
+    obj_ids = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+    train_indices = []
+    val_indices = []
+    test_indices = []
+    for i in range(len(ds)):
+        if (
+            (int(ds.dataset[i]["scene_id"]) in range(0, 48)
+            or int(ds.dataset[i]["scene_id"]) in range(60, 76))
+            and int(ds.dataset[i]["obj_id"]) in obj_ids
+        ):
+            train_indices.append(i)
+        elif (
+            int(ds.dataset[i]["scene_id"]) in range(76, 92)
+            and int(ds.dataset[i]["obj_id"]) in obj_ids
+        ):
+            val_indices.append(i)
+        elif (
+            int(ds.dataset[i]["scene_id"]) in range(48, 60)
+            and int(ds.dataset[i]["obj_id"]) in obj_ids
+        ):
+            test_indices.append(i)
+    
+    return train_indices, val_indices, test_indices
+
+def build_data_loader():
+    ds = YCBVDataset()
+    train_indices, val_indices, test_indices = get_relevant_indices(ds)
+
+    train_ds = Subset(ds, train_indices)
+    val_ds = Subset(ds, val_indices)
+    test_ds = Subset(ds, test_indices)
+
+    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=32, shuffle=False)
+    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)
+
+    return train_loader, val_loader, test_loader
