@@ -3,11 +3,8 @@ import json
 from PIL import Image
 import imageio.v3 as iio
 import torch
-import torchvision
-import matplotlib.pyplot as plt
 import torchvision.transforms.v2.functional as F
 from torch.utils.data import DataLoader, Subset
-from torchvision import datasets
 from pathlib import Path
 
 class YCBVDataset(torch.utils.data.Dataset):
@@ -93,7 +90,8 @@ class YCBVDataset(torch.utils.data.Dataset):
         y_cam = ((y_im - cy) * z) / fy
         x_cam = ((x_im - cx) * z) / fx
         pointcloud = np.stack([x_cam, y_cam, z], axis=1) # Creates an array where each entry is a given x, y, z point
-        indices = np.random.choice(range(len(pointcloud)), 1000, replace=True) # Randomly pick 1000 indices (random sampling)
+        rng = np.random.default_rng(i) # Randomly pick 1000 indices (random sampling)
+        indices = rng.integers(low=0, high=len(pointcloud), size=1000)
         pointcloud = pointcloud[indices]
         pointcloud *= 1e-3 # mm to m
         item["pointcloud"] = torch.tensor(pointcloud, dtype=torch.float32)
@@ -103,6 +101,8 @@ class YCBVDataset(torch.utils.data.Dataset):
         rotation_m2c = torch.tensor(self.dataset[i]["rotation_m2c"], dtype=torch.float32)
         rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
         item["rotation_m2c"] = rotation_m2c
+        bbox_visib = torch.tensor(self.dataset[i]["bbox_visib"], dtype=torch.float32)
+        item["bbox_visib"] = bbox_visib
 
         return item
 
