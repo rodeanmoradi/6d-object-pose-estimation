@@ -65,16 +65,26 @@ class YCBVDataset(torch.utils.data.Dataset):
 
         rgb = Image.open(self.dataset[i]["rgb"])
         rgb = np.array(rgb)
+        depth = iio.imread(self.dataset[i]["depth"])
+        depth = np.array(depth)
+
+        # Crop using square bbox using centre and max len of original bbox
         bbox_visib = self.dataset[i]["bbox_visib"]
-        rgb = rgb[bbox_visib[1]:(bbox_visib[1] + bbox_visib[3]), bbox_visib[0]:(bbox_visib[0] + bbox_visib[2])] # Crop using the object bounding box (x, y, width, height)
-        rgb = F.to_image(rgb) # Reshape to CHW 
+        box_x_c = int(bbox_visib[0] + bbox_visib[2] / 2)
+        box_y_c = int(bbox_visib[1] + bbox_visib[3] / 2)
+        box_max_len = max(bbox_visib[2], bbox_visib[3])
+        item["bbox_visib_x_c"] = box_x_c
+        item["bbox_visib_y_c"] = box_y_c
+        item["bbox_visib_max_len"] = box_max_len
+        start_x = int(box_x_c - box_max_len / 2)
+        start_y = int(box_y_c - box_max_len / 2)
+        rgb = F.to_image(rgb) # Reshape to CHW
+        rgb = F.crop(rgb, start_y, start_x, box_max_len, box_max_len)
         rgb = F.resize(rgb, size=[224, 224]) # Resize
         rgb = F.to_dtype(rgb, dtype=torch.float32, scale=True)
         rgb = F.normalize(rgb, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         item["rgb"] = rgb # Cropped, reshaped to CHW, resized, scaled, normalized, float32
 
-        depth = iio.imread(self.dataset[i]["depth"])
-        depth = np.array(depth)
         depth = depth * self.dataset[i]["depth_scale"]
         mask_visib = iio.imread(self.dataset[i]["mask_visib"])
         mask_visib = np.array(mask_visib)
