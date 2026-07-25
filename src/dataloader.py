@@ -68,7 +68,7 @@ class YCBVDataset(torch.utils.data.Dataset):
         bbox_visib = self.dataset[i]["bbox_visib"]
         rgb = rgb[bbox_visib[1]:(bbox_visib[1] + bbox_visib[3]), bbox_visib[0]:(bbox_visib[0] + bbox_visib[2])] # Crop using the object bounding box (x, y, width, height)
         rgb = F.to_image(rgb) # Reshape to CHW 
-        rgb = F.resize(rgb, size=[128, 128]) # Resize to 128 x 128
+        rgb = F.resize(rgb, size=[224, 224]) # Resize
         rgb = F.to_dtype(rgb, dtype=torch.float32, scale=True)
         rgb = F.normalize(rgb, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         item["rgb"] = rgb # Cropped, reshaped to CHW, resized, scaled, normalized, float32
@@ -133,7 +133,7 @@ def get_relevant_indices(ds):
     
     return train_indices, val_indices, test_indices
 
-def build_data_loader():
+def build_dataloader():
     ds = YCBVDataset()
     train_indices, val_indices, test_indices = get_relevant_indices(ds)
 
