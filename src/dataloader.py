@@ -67,15 +67,14 @@ class YCBVDataset(torch.utils.data.Dataset):
         rgb = np.array(rgb)
         depth = iio.imread(self.dataset[i]["depth"])
         depth = np.array(depth)
+        mask_visib = iio.imread(self.dataset[i]["mask_visib"])
+        mask_visib = np.array(mask_visib)
 
         # Crop using square bbox using centre and max len of original bbox
         bbox_visib = self.dataset[i]["bbox_visib"]
         box_x_c = int(bbox_visib[0] + bbox_visib[2] / 2)
         box_y_c = int(bbox_visib[1] + bbox_visib[3] / 2)
         box_max_len = max(bbox_visib[2], bbox_visib[3])
-        item["bbox_visib_x_c"] = box_x_c
-        item["bbox_visib_y_c"] = box_y_c
-        item["bbox_visib_max_len"] = box_max_len
         start_x = int(box_x_c - box_max_len / 2)
         start_y = int(box_y_c - box_max_len / 2)
         rgb = F.to_image(rgb) # Reshape to CHW
@@ -86,8 +85,6 @@ class YCBVDataset(torch.utils.data.Dataset):
         item["rgb"] = rgb # Cropped, reshaped to CHW, resized, scaled, normalized, float32
 
         depth = depth * self.dataset[i]["depth_scale"]
-        mask_visib = iio.imread(self.dataset[i]["mask_visib"])
-        mask_visib = np.array(mask_visib)
         mask = (mask_visib > 0) & (depth > 0) # Mask is true when depth is nonzero and mask_visib is not black
         y_im, x_im = np.nonzero(mask) # np.nonzero() returns tuple of two arrays (for each dim) where ith row col pair is masked coord
         # Back-projection
@@ -106,15 +103,21 @@ class YCBVDataset(torch.utils.data.Dataset):
         pointcloud *= 1e-3 # mm to m
         item["pointcloud"] = torch.tensor(pointcloud, dtype=torch.float32)
 
+        # Compute scale-invariant translation values
+        ray_x = (box_x_c - cx) / fx
+        ray_y = (box_y_c - cy) / fy
+        scale = np.log(box_max_len) - np.log(fy)
+        geom = [ray_x, ray_y, scale]
+        geom = torch.tensor(geom, dtype=torch.float32)
+        item["geom"] = geom
+
         item["obj_id"] = self.dataset[i]["obj_id"]
         item["translation_m2c"] = torch.tensor(self.dataset[i]["translation_m2c"], dtype=torch.float32) * 1e-3
         rotation_m2c = torch.tensor(self.dataset[i]["rotation_m2c"], dtype=torch.float32)
         rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
         item["rotation_m2c"] = rotation_m2c
-        bbox_visib = torch.tensor(self.dataset[i]["bbox_visib"], dtype=torch.float32)
-        item["bbox_visib"] = bbox_visib
 
-        return item
+        return item # Contains 
 
 
 def get_relevant_indices(ds):
