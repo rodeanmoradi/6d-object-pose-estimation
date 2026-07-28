@@ -5,6 +5,7 @@ import torchvision
 from resnet import init_resnet
 from dataloader import build_dataloader
 
+
 class GeometryEncoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -15,12 +16,12 @@ class GeometryEncoder(nn.Module):
         return F.relu(self.layer_1(x))
 
 
-class RegressionHead(nn.Module):
+class RegressionHead(nn.Module): # TODO: Two heads or one?
     def __init__(self, input_size):
         super().__init__()
         self.layer_1 = nn.Linear(input_size, 256)
         self.layer_2 = nn.Linear(256, 64)
-        self.layer_3 = nn.Linear(64, 7)
+        self.layer_3 = nn.Linear(64, 9)
     
     def forward(self, x):
         x = F.relu(self.layer_1(x))
@@ -40,7 +41,7 @@ class Baseline(nn.Module):
         appearance_feats = self.resnet(rgb)
         geom_feats = self.encoder(geom)
         feats = torch.cat([appearance_feats, geom_feats], dim=1)
-        x = self.head(feats)
+        out = self.head(feats)
 
-        return x
+        return out
 

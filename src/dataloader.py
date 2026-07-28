@@ -7,13 +7,18 @@ import torchvision.transforms.v2.functional as F
 from torch.utils.data import DataLoader, Subset
 from pathlib import Path
 
-class YCBVDataset(torch.utils.data.Dataset):
-    def __init__(self):
-        data_path = Path("data")
-        train_path = data_path / "train_real"
 
+class YCBVDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset):
+        data_path = Path("data")
+        if dataset == "train_real":
+            set_path = data_path / dataset
+        else:
+            set_path = data_path / dataset / "test"
+        with open(data_path / "ycbv_base" / "ycbv" / "test_targets_bop19.json", "r", encoding="utf-8") as targets:
+            targets = json.load(targets)
         self.dataset = []
-        for s in sorted(train_path.iterdir()):
+        for s in sorted(set_path.iterdir()):
             rgb_path = s / "rgb"
             depth_path = s / "depth"
             mask_path = s / "mask"
@@ -34,8 +39,21 @@ class YCBVDataset(torch.utils.data.Dataset):
                 depth_scale = scene_camera[key]["depth_scale"]
 
                 for object_index, (gt, gt_info) in enumerate(zip(scene_gt[key], scene_gt_info[key])):
-                    if gt_info["visib_fract"] < 0.1:
-                        continue
+                    if dataset == "train_real":
+                        if gt_info["visib_fract"] < 0.1:
+                            continue
+                    elif dataset == "ycbv_test_all":
+                        is_in_targets = False
+                        for t in targets: # TODO: Inefficent
+                            if (
+                                t["im_id"] == int(frame_id)
+                                and t["obj_id"] == int(gt["obj_id"])
+                                and t["scene_id"] == int(s.name)
+                            ):
+                                is_in_targets = True
+
+                        if not is_in_targets:
+                            continue
 
                     sample = {
                         "obj_id": gt["obj_id"],
@@ -117,42 +135,43 @@ class YCBVDataset(torch.utils.data.Dataset):
         rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
         item["rotation_m2c"] = rotation_m2c
 
-        return item # Contains 
+        return item 
 
 
-def get_relevant_indices(ds):
+def get_relevant_indices(train_set, test_set):
     #Train/val/test split: 64/16/12 scenes (70%/17%/13%); Train: scenes [0-47], [60-75], Val: [76-91], Test: [48-59]
     obj_ids = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
     train_indices = []
     val_indices = []
     test_indices = []
-    for i in range(len(ds)):
+    for i in range(len(train_set)):
         if (
-            (int(ds.dataset[i]["scene_id"]) in range(0, 48)
-            or int(ds.dataset[i]["scene_id"]) in range(60, 76))
-            and int(ds.dataset[i]["obj_id"]) in obj_ids
+            (int(train_set.dataset[i]["scene_id"]) in range(0, 48)
+            or int(train_set.dataset[i]["scene_id"]) in range(60, 76))
+            and int(train_set.dataset[i]["obj_id"]) in obj_ids
         ):
             train_indices.append(i)
         elif (
-            int(ds.dataset[i]["scene_id"]) in range(76, 92)
-            and int(ds.dataset[i]["obj_id"]) in obj_ids
+            int(train_set.dataset[i]["scene_id"]) in range(76, 92)
+            and int(train_set.dataset[i]["obj_id"]) in obj_ids
         ):
             val_indices.append(i)
-        elif (
-            int(ds.dataset[i]["scene_id"]) in range(48, 60)
-            and int(ds.dataset[i]["obj_id"]) in obj_ids
-        ):
+
+    for i in range(len(test_set)):
+        if int(test_set.dataset[i]["obj_id"]) in obj_ids:
             test_indices.append(i)
     
     return train_indices, val_indices, test_indices
 
 def build_dataloader():
-    ds = YCBVDataset()
-    train_indices, val_indices, test_indices = get_relevant_indices(ds)
+    train_set = YCBVDataset("train_real")
+    test_set = YCBVDataset("ycbv_test_all")
 
-    train_ds = Subset(ds, train_indices)
-    val_ds = Subset(ds, val_indices)
-    test_ds = Subset(ds, test_indices)
+    train_indices, val_indices, test_indices = get_relevant_indices(train_set, test_set)
+
+    train_ds = Subset(train_set, train_indices)
+    val_ds = Subset(train_set, val_indices)
+    test_ds = Subset(test_set, test_indices)
 
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=32, shuffle=False)
