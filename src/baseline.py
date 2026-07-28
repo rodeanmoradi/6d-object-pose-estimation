@@ -21,7 +21,7 @@ class RegressionHead(nn.Module): # TODO: Two heads or one?
         super().__init__()
         self.layer_1 = nn.Linear(input_size, 256)
         self.layer_2 = nn.Linear(256, 64)
-        self.layer_3 = nn.Linear(64, 9)
+        self.layer_3 = nn.Linear(64, 7) # 1 for translation (Z), 6 for rotation
     
     def forward(self, x):
         x = F.relu(self.layer_1(x))

@@ -135,7 +135,7 @@ class YCBVDataset(torch.utils.data.Dataset):
         rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
         item["rotation_m2c"] = rotation_m2c
 
-        return item 
+        return item # dict containing rgb image, pointcloud, 
 
 
 def get_relevant_indices(train_set, test_set):
@@ -163,7 +163,7 @@ def get_relevant_indices(train_set, test_set):
     
     return train_indices, val_indices, test_indices
 
-def build_dataloader():
+def build_dataloader(bs):
     train_set = YCBVDataset("train_real")
     test_set = YCBVDataset("ycbv_test_all")
 
@@ -173,8 +173,8 @@ def build_dataloader():
     val_ds = Subset(train_set, val_indices)
     test_ds = Subset(test_set, test_indices)
 
-    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=32, shuffle=False)
-    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
+    val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False, num_workers=2, pin_memory=True, persistent_workers=True, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=False)
 
     return train_loader, val_loader, test_loader
