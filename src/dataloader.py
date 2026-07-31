@@ -1,8 +1,10 @@
 import numpy as np
 import json
+import pickle
 from PIL import Image
 import imageio.v3 as iio
 import torch
+from torchvision.transforms.v2 import InterpolationMode
 import torchvision.transforms.v2.functional as F
 from torch.utils.data import DataLoader, Subset
 from pathlib import Path
@@ -15,65 +17,78 @@ class YCBVDataset(torch.utils.data.Dataset):
             set_path = data_path / dataset
         else:
             set_path = data_path / dataset / "test"
-        with open(data_path / "ycbv_base" / "ycbv" / "test_targets_bop19.json", "r", encoding="utf-8") as targets:
-            targets = json.load(targets)
-        self.dataset = []
-        for s in sorted(set_path.iterdir()):
-            rgb_path = s / "rgb"
-            depth_path = s / "depth"
-            mask_path = s / "mask"
-            mask_visib_path = s / "mask_visib"
 
-            with open(s / "scene_camera.json", "r", encoding="utf-8") as scene_camera:
-                scene_camera = json.load(scene_camera)
-            with open(s / "scene_gt_info.json", "r", encoding="utf-8") as scene_gt_info:
-                scene_gt_info = json.load(scene_gt_info)
-            with open(s / "scene_gt.json", "r", encoding="utf-8") as scene_gt:
-                scene_gt = json.load(scene_gt)
+        pkl_path = data_path / f"{dataset}.pkl"
+        if pkl_path.exists():
+            with open(data_path / f"{dataset}.pkl", "rb") as file:
+                self.dataset = pickle.load(file)
 
-            for rgb, depth in zip(sorted(rgb_path.iterdir()), sorted(depth_path.iterdir())):
-                frame_id = rgb.stem
-                key = str(int(frame_id))
+        else: # dataset pickle does not exist, create it
+            with open(data_path / "ycbv_base" / "ycbv" / "test_targets_bop19.json", "r", encoding="utf-8") as targets:
+                targets = json.load(targets)
 
-                cam_k = scene_camera[key]["cam_K"]
-                depth_scale = scene_camera[key]["depth_scale"]
+            targets_set = []
+            for t in targets:
+                targets_set.append((t["im_id"], t["obj_id"], t["scene_id"]))
+            targets_set = set(targets_set)
+            
+            self.dataset = []
+            for s in sorted(set_path.iterdir()):
+                rgb_path = s / "rgb"
+                depth_path = s / "depth"
+                mask_path = s / "mask"
+                mask_visib_path = s / "mask_visib"
 
-                for object_index, (gt, gt_info) in enumerate(zip(scene_gt[key], scene_gt_info[key])):
-                    if dataset == "train_real":
-                        if gt_info["visib_fract"] < 0.1:
-                            continue
-                    elif dataset == "ycbv_test_all":
-                        is_in_targets = False
-                        for t in targets: # TODO: Inefficent
-                            if (
-                                t["im_id"] == int(frame_id)
-                                and t["obj_id"] == int(gt["obj_id"])
-                                and t["scene_id"] == int(s.name)
-                            ):
-                                is_in_targets = True
+                with open(s / "scene_camera.json", "r", encoding="utf-8") as scene_camera:
+                    scene_camera = json.load(scene_camera)
+                with open(s / "scene_gt_info.json", "r", encoding="utf-8") as scene_gt_info:
+                    scene_gt_info = json.load(scene_gt_info)
+                with open(s / "scene_gt.json", "r", encoding="utf-8") as scene_gt:
+                    scene_gt = json.load(scene_gt)
+                print(f"s: {s}") # REMOVE
+                for rgb, depth in zip(sorted(rgb_path.iterdir()), sorted(depth_path.iterdir())):
+                    frame_id = rgb.stem
+                    key = str(int(frame_id))
 
-                        if not is_in_targets:
-                            continue
+                    cam_k = scene_camera[key]["cam_K"]
+                    depth_scale = scene_camera[key]["depth_scale"]
 
-                    sample = {
-                        "obj_id": gt["obj_id"],
-                        "scene_id": s.name,
-                        "rgb": rgb,
-                        "depth": depth,
-                        "mask": mask_path / f"{frame_id}_{object_index:06d}.png",
-                        "mask_visib": mask_visib_path / f"{frame_id}_{object_index:06d}.png",
-                        "cam_K": cam_k,
-                        "depth_scale": depth_scale,
-                        "rotation_m2c": gt["cam_R_m2c"],
-                        "translation_m2c": gt["cam_t_m2c"],
-                        "bbox_obj": gt_info["bbox_obj"],
-                        "bbox_visib": gt_info["bbox_visib"],
-                        "px_count_all": gt_info["px_count_all"],
-                        "px_count_valid": gt_info["px_count_valid"],
-                        "px_count_visib": gt_info["px_count_visib"],
-                        "visib_fract": gt_info["visib_fract"],
-                    }
-                    self.dataset.append(sample)
+                    depth_arr = iio.imread(depth)
+                    print(f"rgb: {rgb}") # REMOVE
+                    for object_index, (gt, gt_info) in enumerate(zip(scene_gt[key], scene_gt_info[key])):
+                        mask_visib = iio.imread(mask_visib_path / f"{frame_id}_{object_index:06d}.png")
+                        valid = (mask_visib > 0) & (depth_arr > 0)
+                        num_valid = np.count_nonzero(valid)
+
+                        if dataset == "train_real":
+                            if gt_info["visib_fract"] < 0.1 or num_valid < 10:
+                                continue
+                        elif dataset == "ycbv_test_all":
+                            if not ((int(frame_id), int(gt["obj_id"]), int(s.name)) in targets_set):
+                                continue
+
+                        sample = {
+                            "obj_id": gt["obj_id"],
+                            "scene_id": s.name,
+                            "rgb": rgb,
+                            "depth": depth,
+                            "mask": mask_path / f"{frame_id}_{object_index:06d}.png",
+                            "mask_visib": mask_visib_path / f"{frame_id}_{object_index:06d}.png",
+                            "cam_K": cam_k,
+                            "depth_scale": depth_scale,
+                            "rotation_m2c": gt["cam_R_m2c"],
+                            "translation_m2c": gt["cam_t_m2c"],
+                            "bbox_obj": gt_info["bbox_obj"],
+                            "bbox_visib": gt_info["bbox_visib"],
+                            "px_count_all": gt_info["px_count_all"],
+                            "px_count_valid": gt_info["px_count_valid"],
+                            "px_count_visib": gt_info["px_count_visib"],
+                            "visib_fract": gt_info["visib_fract"],
+                        }
+                        self.dataset.append(sample)
+                        print(f"obj: {object_index}") # REMOVE
+            with open(data_path / f"{dataset}.pkl", "wb") as file:
+                pickle.dump(self.dataset, file)
 
     def __len__(self):
         return len(self.dataset)
@@ -84,9 +99,7 @@ class YCBVDataset(torch.utils.data.Dataset):
         rgb = Image.open(self.dataset[i]["rgb"])
         rgb = np.array(rgb)
         depth = iio.imread(self.dataset[i]["depth"])
-        depth = np.array(depth)
         mask_visib = iio.imread(self.dataset[i]["mask_visib"])
-        mask_visib = np.array(mask_visib)
 
         # Crop using square bbox using centre and max len of original bbox
         bbox_visib = self.dataset[i]["bbox_visib"]
@@ -100,6 +113,13 @@ class YCBVDataset(torch.utils.data.Dataset):
         rgb = F.resize(rgb, size=[224, 224]) # Resize
         rgb = F.to_dtype(rgb, dtype=torch.float32, scale=True)
         rgb = F.normalize(rgb, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+
+        mask_visib_transform = F.to_image(mask_visib)
+        mask_visib_transform = F.crop(mask_visib_transform, start_y, start_x, box_max_len, box_max_len)
+        mask_visib_transform = F.resize(mask_visib_transform, size=[224, 224], interpolation=InterpolationMode.NEAREST)
+        mask_visib_transform = mask_visib_transform.bool().to(torch.float32)
+
+        rgb = rgb * mask_visib_transform
         item["rgb"] = rgb # Cropped, reshaped to CHW, resized, scaled, normalized, float32
 
         depth = depth * self.dataset[i]["depth_scale"]
@@ -129,7 +149,9 @@ class YCBVDataset(torch.utils.data.Dataset):
         geom = torch.tensor(geom, dtype=torch.float32)
         item["geom"] = geom
 
-        item["obj_id"] = self.dataset[i]["obj_id"]
+        obj_id_mapping = {1: 0, 3: 1, 5: 2, 7: 3, 9: 4, 11: 5, 13: 6, 15: 7, 17: 8, 19: 9}
+        item["obj_id"] = obj_id_mapping[self.dataset[i]["obj_id"]]
+
         item["translation_m2c"] = torch.tensor(self.dataset[i]["translation_m2c"], dtype=torch.float32) * 1e-3
         rotation_m2c = torch.tensor(self.dataset[i]["rotation_m2c"], dtype=torch.float32)
         rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
@@ -173,8 +195,8 @@ def build_dataloader(bs):
     val_ds = Subset(train_set, val_indices)
     test_ds = Subset(test_set, test_indices)
 
-    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
-    val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False, num_workers=2, pin_memory=True, persistent_workers=True, drop_last=False)
-    test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=False)
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True, drop_last=True)
+    val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False, num_workers=8, pin_memory=True, persistent_workers=True, drop_last=False)
 
     return train_loader, val_loader, test_loader

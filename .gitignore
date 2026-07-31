@@ -2,3 +2,6 @@ data/train_real
 data/ycbv_base
 data/ycbv_models
 data/ycbv_test_all
+data/train_real.pkl
+data/ycbv_test_all.pkl
+data/models

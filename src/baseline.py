@@ -15,7 +15,6 @@ class GeometryEncoder(nn.Module):
 
         return F.relu(self.layer_1(x))
 
-
 class RegressionHead(nn.Module): # TODO: Two heads or one?
     def __init__(self, input_size):
         super().__init__()
@@ -35,12 +34,14 @@ class Baseline(nn.Module):
         super().__init__()
         self.resnet = init_resnet()
         self.encoder = GeometryEncoder()
-        self.head = RegressionHead(input_size=576) # 512 from resnet, 64 from encoder
+        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=16)
+        self.head = RegressionHead(input_size=592) # 512 from resnet, 64 from encoder, 16 from embedding
 
-    def forward(self, rgb, geom):
+    def forward(self, rgb, geom, obj_id):
         appearance_feats = self.resnet(rgb)
         geom_feats = self.encoder(geom)
-        feats = torch.cat([appearance_feats, geom_feats], dim=1)
+        object_embedding = self.embedding(obj_id)
+        feats = torch.cat([object_embedding, appearance_feats, geom_feats], dim=1)
         out = self.head(feats)
 
         return out
