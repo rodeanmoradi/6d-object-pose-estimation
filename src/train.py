@@ -31,7 +31,7 @@ def gram_schmidt(out):
 
     return rot
 
-# TODO: Display plot after each full loop, object IDs??
+# TODO: Display plot after each full loop
 def train_baseline(model, ne, bs, lr):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
@@ -127,7 +127,7 @@ def train_baseline(model, ne, bs, lr):
 
 def main():
     model = Baseline()
-    train_baseline(model, 10, 32, 0.0001)
+    train_baseline(model, 15, 64, 0.0001)
 
 if __name__ == "__main__":
     main()

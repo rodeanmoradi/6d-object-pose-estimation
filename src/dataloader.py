@@ -6,14 +6,14 @@ import imageio.v3 as iio
 import torch
 from torchvision.transforms.v2 import InterpolationMode
 import torchvision.transforms.v2.functional as F
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, ConcatDataset
 from pathlib import Path
 
 
 class YCBVDataset(torch.utils.data.Dataset):
     def __init__(self, dataset):
         data_path = Path("data")
-        if dataset == "train_real":
+        if dataset == "train_real" or dataset == "train_pbr":
             set_path = data_path / dataset
         else:
             set_path = data_path / dataset / "test"
@@ -53,18 +53,21 @@ class YCBVDataset(torch.utils.data.Dataset):
                     cam_k = scene_camera[key]["cam_K"]
                     depth_scale = scene_camera[key]["depth_scale"]
 
-                    depth_arr = iio.imread(depth)
+                    depth_arr = iio.imread(depth) if dataset != "train_pbr" else None
                     print(f"rgb: {rgb}") # REMOVE
                     for object_index, (gt, gt_info) in enumerate(zip(scene_gt[key], scene_gt_info[key])):
-                        mask_visib = iio.imread(mask_visib_path / f"{frame_id}_{object_index:06d}.png")
-                        valid = (mask_visib > 0) & (depth_arr > 0)
-                        num_valid = np.count_nonzero(valid)
+                        if dataset != "train_pbr":
+                            mask_visib = iio.imread(mask_visib_path / f"{frame_id}_{object_index:06d}.png")
+                            valid = (mask_visib > 0) & (depth_arr > 0)
+                            num_valid = np.count_nonzero(valid)
+                        else:
+                            num_valid = gt_info["px_count_valid"]
 
-                        if dataset == "train_real":
+                        if dataset == "train_real" or dataset == "train_pbr":
                             if gt_info["visib_fract"] < 0.1 or num_valid < 10:
                                 continue
                         elif dataset == "ycbv_test_all":
-                            if not ((int(frame_id), int(gt["obj_id"]), int(s.name)) in targets_set):
+                            if not ((int(frame_id), int(gt["obj_id"]), int(s.name)) in targets_set) or num_valid < 10:
                                 continue
 
                         sample = {
@@ -160,15 +163,16 @@ class YCBVDataset(torch.utils.data.Dataset):
         return item # dict containing rgb image, pointcloud, 
 
 
-def get_relevant_indices(train_set, test_set):
+def get_relevant_indices(train_set, test_set=[]):
     #Train/val/test split: 64/16/12 scenes (70%/17%/13%); Train: scenes [0-47], [60-75], Val: [76-91], Test: [48-59]
     obj_ids = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
     train_indices = []
     val_indices = []
     test_indices = []
+    range_end = 50 if len(test_set) == 0 else 48
     for i in range(len(train_set)):
         if (
-            (int(train_set.dataset[i]["scene_id"]) in range(0, 48)
+            (int(train_set.dataset[i]["scene_id"]) in range(0, range_end)
             or int(train_set.dataset[i]["scene_id"]) in range(60, 76))
             and int(train_set.dataset[i]["obj_id"]) in obj_ids
         ):
@@ -186,10 +190,14 @@ def get_relevant_indices(train_set, test_set):
     return train_indices, val_indices, test_indices
 
 def build_dataloader(bs):
-    train_set = YCBVDataset("train_real")
+    train_set_real = YCBVDataset("train_real")
+    train_set_synt = YCBVDataset("train_pbr")
+    train_set = ConcatDataset([train_set_real, train_set_synt])
     test_set = YCBVDataset("ycbv_test_all")
 
-    train_indices, val_indices, test_indices = get_relevant_indices(train_set, test_set)
+    train_real_indices, val_indices, test_indices = get_relevant_indices(train_set_real, test_set)
+    train_synt_indices, _, _ = get_relevant_indices(train_set_synt)
+    train_indices = train_real_indices + [item + len(train_set_real) for item in train_synt_indices]
 
     train_ds = Subset(train_set, train_indices)
     val_ds = Subset(train_set, val_indices)
