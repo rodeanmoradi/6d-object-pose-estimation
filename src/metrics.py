@@ -7,15 +7,15 @@ def calculate_avg_distance(rot_gt, t_gt, rot_pred, t_pred, model_points, pointcl
     return
 
 def calculate_avg_distance_sym(rot_gt, t_gt, rot_pred, t_pred, model_points):
-    sum = 0
-    predicted_points = rot_pred * model_points + t_pred # dont get what the starting point is and how it gets transformed or what gt is
-    for p in predicted_points:
-        m_min = model_points[0]
-        for m, i in enumerate(model_points):
-            if m - p < m_min:
-                m_min = m
-            sum += abs((rot_pred * m + t_pred) - (rot_gt * m_min + t_gt))
+    total_dist = 0
+    for m in model_points:
+        min_dist = 1e9
+        for m_p in model_points:
+            dist = abs((rot_pred * m + t_pred) - (rot_gt * m_p + t_gt))
+            if dist < min_dist:
+                min_dist = dist
+        total_dist += min_dist
 
-    avg_distance_sym = sum / len(model_points)
+    avg_distance_sym = total_dist / len(model_points)
 
     return avg_distance_sym
