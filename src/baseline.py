@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
-from resnet import init_resnet
-from dataloader import build_dataloader
+from src.resnet import init_resnet
 
 
 class GeometryEncoder(nn.Module):

@@ -1,9 +1,1 @@
-data/train_real
-data/train_pbr
-data/ycbv_base
-data/ycbv_models
-data/ycbv_test_all
-data/train_real.pkl
-data/train_pbr.pkl
-data/ycbv_test_all.pkl
-data/models
+data

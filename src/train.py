@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from dataloader import build_dataloader
-from baseline import Baseline
+from src.dataloader import build_dataloader
 
 def get_translation(out, geom):
     log_z = torch.clamp(out[:, 0], -3.0, 2.0)
@@ -124,10 +123,3 @@ def train_baseline(model, ne, bs, lr):
         print(f"Epoch: {e}, Validation Loss (Total): {val_loss_running}, Validation Loss (Rotation): {val_rot_loss_running}, Validation Loss (Translation): {val_t_loss_running}")
 
     return
-
-def main():
-    model = Baseline()
-    train_baseline(model, 15, 64, 0.0001)
-
-if __name__ == "__main__":
-    main()
