@@ -95,7 +95,8 @@ class YCBVDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.dataset)
-    
+
+    # TODO: center pointcloud
     def __getitem__(self, i):
         item = {}
 

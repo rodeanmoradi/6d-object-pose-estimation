@@ -1,7 +1,5 @@
 import numpy as np
-import torch
 import torchvision
-import torchvision.transforms.v2.functional as F
 import torch.nn as nn
 
 def init_resnet():

@@ -13,7 +13,7 @@ def get_translation(out, geom):
 
 def gram_schmidt(out):
     epsilon = 1.0e-8
-    # Head outputs a tensor of size 7 (first dims translation, last 6 rotation)
+    # Head outputs a tensor of size 7 (first dims translation, last 6 rotation) TODO: Update indices and add var
     rotation_6d = out[:, 1:]
     a = rotation_6d[:, :3]
     b = rotation_6d[:, 3:]
@@ -121,5 +121,10 @@ def train_baseline(model, ne, bs, lr):
 
         print(f"Epoch: {e}, Training Loss (Total): {train_loss_running}, Training Loss (Rotation): {train_rot_loss_running}, Training Loss (Translation): {train_t_loss_running}")
         print(f"Epoch: {e}, Validation Loss (Total): {val_loss_running}, Validation Loss (Rotation): {val_rot_loss_running}, Validation Loss (Translation): {val_t_loss_running}")
+
+    return
+
+# TODO: Determine metrics/results needed
+def train():
 
     return
