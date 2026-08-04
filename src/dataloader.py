@@ -96,7 +96,6 @@ class YCBVDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    # TODO: center pointcloud
     def __getitem__(self, i):
         item = {}
 
@@ -141,9 +140,12 @@ class YCBVDataset(torch.utils.data.Dataset):
         pointcloud = np.stack([x_cam, y_cam, z], axis=1) # Creates an array where each entry is a given x, y, z point
         rng = np.random.default_rng(i) # Randomly pick 1000 indices (random sampling)
         indices = rng.integers(low=0, high=len(pointcloud), size=1000)
-        pointcloud = pointcloud[indices]
+        pointcloud = pointcloud[indices] # Shape: (1000 x 3)
         pointcloud *= 1e-3 # mm to m
+        centroid = pointcloud.mean(axis=0) # Centroid is required to center pointcloud for translation invariance; MLP is only concerned with shape not location
+        pointcloud = pointcloud - centroid
         item["pointcloud"] = torch.tensor(pointcloud, dtype=torch.float32)
+        item["centroid"] = torch.tensor(centroid, dtype=torch.float32)
 
         # Compute scale-invariant translation values
         ray_x = (box_x_c - cx) / fx
@@ -161,7 +163,7 @@ class YCBVDataset(torch.utils.data.Dataset):
         rotation_m2c = torch.reshape(rotation_m2c, (3, 3))
         item["rotation_m2c"] = rotation_m2c
 
-        return item # dict containing rgb image, pointcloud, 
+        return item 
 
 
 def get_relevant_indices(train_set, test_set=[]):
