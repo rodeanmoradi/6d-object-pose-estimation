@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import wandb
 from src.dataloader import build_dataloader
 
 def get_translation(out, geom):
@@ -125,14 +126,25 @@ def train_baseline(model, ne, bs, lr):
     return
 
 # TODO: Determine metrics/results needed
-def train(model, ne, bs, lr):
+def train_model(model, ne, bs, lr):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
+
+    run = wandb.init(
+        entity="rodean-moradi-university-of-toronto",
+        project="6d-pose-estimation",
+        config={
+            "learning_rate": 0.0002,
+            "variant": "RGB-D",
+            "dataset": "YCB-Video",
+            "epochs": 10
+        }
+    )
 
     model.to(device)
     translation_criterion = nn.SmoothL1Loss(beta=0.01)
     rotation_criterion = nn.MSELoss() # Chordal loss
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     train_loader, val_loader, _ = build_dataloader(bs)
     loss_lambda = 0.5
     best_val_loss = 1.0e9
@@ -212,7 +224,14 @@ def train(model, ne, bs, lr):
                 }
                 torch.save(checkpoint, f"data/models/best_ne_{ne}_bs_{bs}_lr_{lr}.pt")
 
-        print(f"Epoch: {e}, Training Loss (Total): {train_loss_running}, Training Loss (Rotation): {train_rot_loss_running}, Training Loss (Translation): {train_t_loss_running}")
-        print(f"Epoch: {e}, Validation Loss (Total): {val_loss_running}, Validation Loss (Rotation): {val_rot_loss_running}, Validation Loss (Translation): {val_t_loss_running}")
+        run.log({
+            "train/total_loss": train_loss_running,
+            "train/rotation_loss": train_rot_loss_running,
+            "train/translation_loss": train_t_loss_running,
+            "val/total_loss": val_loss_running,
+            "val/rotation_loss": val_rot_loss_running,
+            "val/translation_loss": val_t_loss_running
+        })
+    run.finish()
 
     return

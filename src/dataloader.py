@@ -45,7 +45,6 @@ class YCBVDataset(torch.utils.data.Dataset):
                     scene_gt_info = json.load(scene_gt_info)
                 with open(s / "scene_gt.json", "r", encoding="utf-8") as scene_gt:
                     scene_gt = json.load(scene_gt)
-                print(f"s: {s}") # REMOVE
                 for rgb, depth in zip(sorted(rgb_path.iterdir()), sorted(depth_path.iterdir())):
                     frame_id = rgb.stem
                     key = str(int(frame_id))
@@ -54,7 +53,6 @@ class YCBVDataset(torch.utils.data.Dataset):
                     depth_scale = scene_camera[key]["depth_scale"]
 
                     depth_arr = iio.imread(depth) if dataset != "train_pbr" else None
-                    print(f"rgb: {rgb}") # REMOVE
                     for object_index, (gt, gt_info) in enumerate(zip(scene_gt[key], scene_gt_info[key])):
                         if dataset != "train_pbr":
                             mask_visib = iio.imread(mask_visib_path / f"{frame_id}_{object_index:06d}.png")
@@ -89,7 +87,6 @@ class YCBVDataset(torch.utils.data.Dataset):
                             "visib_fract": gt_info["visib_fract"],
                         }
                         self.dataset.append(sample)
-                        print(f"obj: {object_index}") # REMOVE
             with open(data_path / f"{dataset}.pkl", "wb") as file:
                 pickle.dump(self.dataset, file)
 
@@ -138,12 +135,12 @@ class YCBVDataset(torch.utils.data.Dataset):
         y_cam = ((y_im - cy) * z) / fy
         x_cam = ((x_im - cx) * z) / fx
         pointcloud = np.stack([x_cam, y_cam, z], axis=1) # Creates an array where each entry is a given x, y, z point
-        rng = np.random.default_rng(i) # Randomly pick 1000 indices (random sampling)
+        rng = np.random.default_rng() # Randomly pick 1000 indices (random sampling) TODO: Fix
         indices = rng.integers(low=0, high=len(pointcloud), size=1000)
         pointcloud = pointcloud[indices] # Shape: (1000 x 3)
         pointcloud *= 1e-3 # mm to m
         centroid = pointcloud.mean(axis=0) # Centroid is required to center pointcloud for translation invariance; MLP is only concerned with shape not location
-        pointcloud = pointcloud - centroid
+        pointcloud -= centroid
         item["pointcloud"] = torch.tensor(pointcloud, dtype=torch.float32)
         item["centroid"] = torch.tensor(centroid, dtype=torch.float32)
 
