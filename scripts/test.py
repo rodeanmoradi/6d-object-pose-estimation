@@ -45,7 +45,7 @@ if __name__ == "__main__":
             out = model(rgb, geom, obj_id)
             
             t = get_translation(out, geom)
-            rot = gram_schmidt(out)
+            rot = gram_schmidt(out, rotation_start_index=1)
 
             translation_loss = translation_criterion(t, translation_gt)
             rotation_loss = rotation_criterion(rot, rotation_gt)

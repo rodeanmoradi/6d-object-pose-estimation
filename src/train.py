@@ -2,7 +2,21 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import wandb
+from pathlib import Path
 from src.dataloader import build_dataloader
+from src.symmetry import SymmetryAwareChordalLoss
+
+CHECKPOINT_DIR = Path("data/models")
+
+
+def save_checkpoint(path, model, optimizer, epoch, loss):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "loss": loss,
+        "epoch": epoch
+    }, path)
 
 def get_translation(out, geom):
     log_z = torch.clamp(out[:, 0], -3.0, 2.0)
@@ -37,14 +51,34 @@ def train_baseline(model, ne, bs, lr):
     device = torch.device(device)
     model.to(device)
 
-    translation_criterion = nn.SmoothL1Loss(beta=0.1)
-    rotation_criterion = nn.MSELoss() # Chordal loss
+    # Beta is scale-coupled to the translation parametrisation, so it differs from
+    # the RGB-D variant on purpose - see train_model.
+    translation_beta = 0.1
+    loss_lambda = 0.5
+
+    run = wandb.init(
+        entity="rodean-moradi-university-of-toronto",
+        project="6d-pose-estimation",
+        config={
+            "learning_rate": lr,
+            "epochs": ne,
+            "batch_size": bs,
+            "variant": "RGB",
+            "dataset": "YCB-Video",
+            "optimizer": "Adam",
+            "smooth_l1_beta": translation_beta,
+            "loss_lambda": loss_lambda,
+            "rotation_loss": "symmetry_aware_chordal",
+        }
+    )
+
+    translation_criterion = nn.SmoothL1Loss(beta=translation_beta)
+    rotation_criterion = SymmetryAwareChordalLoss().to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     train_loader, val_loader, _ = build_dataloader(bs)
 
-    loss_lambda = 0.5
     best_val_loss = 1.0e9
     for e in range(ne):
         model.train()
@@ -66,7 +100,7 @@ def train_baseline(model, ne, bs, lr):
             rot = gram_schmidt(out, rotation_start_index=1)
 
             translation_loss = translation_criterion(t, translation_gt)
-            rotation_loss = rotation_criterion(rot, rotation_gt)
+            rotation_loss = rotation_criterion(rot, rotation_gt, obj_id)
             train_loss = translation_loss + loss_lambda * rotation_loss
 
             train_t_loss_running += translation_loss.item()
@@ -99,7 +133,7 @@ def train_baseline(model, ne, bs, lr):
                 rot = gram_schmidt(out, rotation_start_index=1)
     
                 translation_loss = translation_criterion(t, translation_gt)
-                rotation_loss = rotation_criterion(rot, rotation_gt)
+                rotation_loss = rotation_criterion(rot, rotation_gt, obj_id)
                 val_loss = translation_loss + loss_lambda * rotation_loss
 
                 val_t_loss_running += translation_loss.item()
@@ -113,15 +147,21 @@ def train_baseline(model, ne, bs, lr):
             if val_loss_running < best_val_loss:
                 best_val_loss = val_loss_running
 
-                checkpoint = {
-                    "model_state_dict": model.state_dict(),
-                    "loss": best_val_loss,
-                    "epoch": e
-                }
-                torch.save(checkpoint, f"data/models/best_baseline_ne_{ne}_bs_{bs}_lr_{lr}.pt")
+                save_checkpoint(
+                    CHECKPOINT_DIR / f"best_baseline_ne_{ne}_bs_{bs}_lr_{lr}.pt",
+                    model, optimizer, e, best_val_loss
+                )
 
-        print(f"Epoch: {e}, Training Loss (Total): {train_loss_running}, Training Loss (Rotation): {train_rot_loss_running}, Training Loss (Translation): {train_t_loss_running}")
-        print(f"Epoch: {e}, Validation Loss (Total): {val_loss_running}, Validation Loss (Rotation): {val_rot_loss_running}, Validation Loss (Translation): {val_t_loss_running}")
+        run.log({
+            "epoch": e,
+            "train/total_loss": train_loss_running,
+            "train/rotation_loss": train_rot_loss_running,
+            "train/translation_loss": train_t_loss_running,
+            "val/total_loss": val_loss_running,
+            "val/rotation_loss": val_rot_loss_running,
+            "val/translation_loss": val_t_loss_running
+        })
+    run.finish()
 
     return
 
@@ -130,23 +170,34 @@ def train_model(model, ne, bs, lr):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
 
+    # Translation here is a residual off the point-cloud centroid rather than a depth
+    # regressed from scratch, so beta sits an order of magnitude below the baseline's.
+    translation_beta = 0.01
+    loss_lambda = 0.5
+    weight_decay = 1e-4
+
     run = wandb.init(
         entity="rodean-moradi-university-of-toronto",
         project="6d-pose-estimation",
         config={
-            "learning_rate": 0.0002,
+            "learning_rate": lr,
+            "epochs": ne,
+            "batch_size": bs,
             "variant": "RGB-D",
             "dataset": "YCB-Video",
-            "epochs": 10
+            "optimizer": "AdamW",
+            "weight_decay": weight_decay,
+            "smooth_l1_beta": translation_beta,
+            "loss_lambda": loss_lambda,
+            "rotation_loss": "symmetry_aware_chordal",
         }
     )
 
     model.to(device)
-    translation_criterion = nn.SmoothL1Loss(beta=0.01)
-    rotation_criterion = nn.MSELoss() # Chordal loss
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    translation_criterion = nn.SmoothL1Loss(beta=translation_beta)
+    rotation_criterion = SymmetryAwareChordalLoss().to(device)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     train_loader, val_loader, _ = build_dataloader(bs)
-    loss_lambda = 0.5
     best_val_loss = 1.0e9
     for e in range(ne):
         model.train()
@@ -169,7 +220,7 @@ def train_model(model, ne, bs, lr):
             rot = gram_schmidt(out, rotation_start_index=3)
 
             translation_loss = translation_criterion(t, translation_gt)
-            rotation_loss = rotation_criterion(rot, rotation_gt)
+            rotation_loss = rotation_criterion(rot, rotation_gt, obj_id)
             train_loss = translation_loss + loss_lambda * rotation_loss
 
             train_t_loss_running += translation_loss.item()
@@ -203,7 +254,7 @@ def train_model(model, ne, bs, lr):
                 rot = gram_schmidt(out, rotation_start_index=3)
     
                 translation_loss = translation_criterion(t, translation_gt)
-                rotation_loss = rotation_criterion(rot, rotation_gt)
+                rotation_loss = rotation_criterion(rot, rotation_gt, obj_id)
                 val_loss = translation_loss + loss_lambda * rotation_loss
 
                 val_t_loss_running += translation_loss.item()
@@ -217,14 +268,13 @@ def train_model(model, ne, bs, lr):
             if val_loss_running < best_val_loss:
                 best_val_loss = val_loss_running
 
-                checkpoint = {
-                    "model_state_dict": model.state_dict(),
-                    "loss": best_val_loss,
-                    "epoch": e
-                }
-                torch.save(checkpoint, f"data/models/best_ne_{ne}_bs_{bs}_lr_{lr}.pt")
+                save_checkpoint(
+                    CHECKPOINT_DIR / f"best_ne_{ne}_bs_{bs}_lr_{lr}.pt",
+                    model, optimizer, e, best_val_loss
+                )
 
         run.log({
+            "epoch": e,
             "train/total_loss": train_loss_running,
             "train/rotation_loss": train_rot_loss_running,
             "train/translation_loss": train_t_loss_running,

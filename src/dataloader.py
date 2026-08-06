@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 import json
 import pickle
 from PIL import Image
@@ -9,9 +10,21 @@ import torchvision.transforms.v2.functional as F
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 from pathlib import Path
 
+# The subset of YCB-V objects this project trains on. The network predicts a class
+# index into this list, so OBJ_IDS[index] recovers the original BOP object id.
+OBJ_IDS = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+OBJ_ID_TO_INDEX = {obj_id: i for i, obj_id in enumerate(OBJ_IDS)}
+
 
 class YCBVDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset):
+    # deterministic=True seeds the point sampling from the sample index, so a given
+    # sample yields the same cloud on every pass. Validation and test must set it,
+    # otherwise the metric being compared across epochs moves on its own.
+    def __init__(self, dataset, deterministic=False, num_points=1000, seed=0):
+        self.deterministic = deterministic
+        self.num_points = num_points
+        self.seed = seed
+
         data_path = Path("data")
         if dataset == "train_real" or dataset == "train_pbr":
             set_path = data_path / dataset
@@ -93,6 +106,15 @@ class YCBVDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
+    def deterministic_view(self):
+        # Train and val are index subsets of the same underlying dataset, so val needs
+        # a handle with deterministic sampling that still shares the (large) sample
+        # list. A shallow copy rebinds the flag without duplicating the metadata.
+        view = copy.copy(self)
+        view.deterministic = True
+
+        return view
+
     def __getitem__(self, i):
         item = {}
 
@@ -135,9 +157,13 @@ class YCBVDataset(torch.utils.data.Dataset):
         y_cam = ((y_im - cy) * z) / fy
         x_cam = ((x_im - cx) * z) / fx
         pointcloud = np.stack([x_cam, y_cam, z], axis=1) # Creates an array where each entry is a given x, y, z point
-        rng = np.random.default_rng() # Randomly pick 1000 indices (random sampling) TODO: Fix
-        indices = rng.integers(low=0, high=len(pointcloud), size=1000)
-        pointcloud = pointcloud[indices] # Shape: (1000 x 3)
+        # Sample a fixed-size cloud. Sampling without replacement keeps the point set
+        # faithful to the object's surface; only clouds smaller than num_points have to
+        # repeat points to reach the fixed size.
+        rng = np.random.default_rng(self.seed + i if self.deterministic else None)
+        replace = len(pointcloud) < self.num_points
+        indices = rng.choice(len(pointcloud), size=self.num_points, replace=replace)
+        pointcloud = pointcloud[indices] # Shape: (num_points x 3)
         pointcloud *= 1e-3 # mm to m
         centroid = pointcloud.mean(axis=0) # Centroid is required to center pointcloud for translation invariance; MLP is only concerned with shape not location
         pointcloud -= centroid
@@ -152,8 +178,7 @@ class YCBVDataset(torch.utils.data.Dataset):
         geom = torch.tensor(geom, dtype=torch.float32)
         item["geom"] = geom
 
-        obj_id_mapping = {1: 0, 3: 1, 5: 2, 7: 3, 9: 4, 11: 5, 13: 6, 15: 7, 17: 8, 19: 9}
-        item["obj_id"] = obj_id_mapping[self.dataset[i]["obj_id"]]
+        item["obj_id"] = OBJ_ID_TO_INDEX[self.dataset[i]["obj_id"]]
 
         item["translation_m2c"] = torch.tensor(self.dataset[i]["translation_m2c"], dtype=torch.float32) * 1e-3
         rotation_m2c = torch.tensor(self.dataset[i]["rotation_m2c"], dtype=torch.float32)
@@ -165,7 +190,7 @@ class YCBVDataset(torch.utils.data.Dataset):
 
 def get_relevant_indices(train_set, test_set=[]):
     #Train/val/test split: 64/16/12 scenes (70%/17%/13%); Train: scenes [0-47], [60-75], Val: [76-91], Test: [48-59]
-    obj_ids = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+    obj_ids = OBJ_IDS
     train_indices = []
     val_indices = []
     test_indices = []
@@ -193,14 +218,16 @@ def build_dataloader(bs):
     train_set_real = YCBVDataset("train_real")
     train_set_synt = YCBVDataset("train_pbr")
     train_set = ConcatDataset([train_set_real, train_set_synt])
-    test_set = YCBVDataset("ycbv_test_all")
+    test_set = YCBVDataset("ycbv_test_all", deterministic=True)
 
     train_real_indices, val_indices, test_indices = get_relevant_indices(train_set_real, test_set)
     train_synt_indices, _, _ = get_relevant_indices(train_set_synt)
     train_indices = train_real_indices + [item + len(train_set_real) for item in train_synt_indices]
 
     train_ds = Subset(train_set, train_indices)
-    val_ds = Subset(train_set, val_indices)
+    # val_indices are indices into train_set_real (get_relevant_indices only assigns val
+    # scenes from the real split), so the view is taken there rather than on the concat.
+    val_ds = Subset(train_set_real.deterministic_view(), val_indices)
     test_ds = Subset(test_set, test_indices)
 
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True, drop_last=True)
