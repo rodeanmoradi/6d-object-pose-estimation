@@ -8,7 +8,6 @@ from src.symmetry import SymmetryAwareChordalLoss
 
 CHECKPOINT_DIR = Path("data/models")
 
-
 def save_checkpoint(path, model, optimizer, epoch, loss):
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
@@ -45,7 +44,6 @@ def gram_schmidt(out, rotation_start_index):
 
     return rot
 
-# TODO: Display plot after each full loop
 def train_baseline(model, ne, bs, lr):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
@@ -69,6 +67,7 @@ def train_baseline(model, ne, bs, lr):
             "smooth_l1_beta": translation_beta,
             "loss_lambda": loss_lambda,
             "rotation_loss": "symmetry_aware_chordal",
+            "lr_schedule": "cosine",
         }
     )
 
@@ -76,8 +75,12 @@ def train_baseline(model, ne, bs, lr):
     rotation_criterion = SymmetryAwareChordalLoss().to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    # A constant LR keeps the last update as large as the first, so the weights at each
+    # epoch boundary land somewhere arbitrary and the val curve jumps. Decaying to ~0
+    # lets the iterate settle.
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=ne)
 
-    train_loader, val_loader, _ = build_dataloader(bs)
+    train_loader, val_loader, _ = build_dataloader(bs, baseline=True)
 
     best_val_loss = 1.0e9
     for e in range(ne):
@@ -159,13 +162,14 @@ def train_baseline(model, ne, bs, lr):
             "train/translation_loss": train_t_loss_running,
             "val/total_loss": val_loss_running,
             "val/rotation_loss": val_rot_loss_running,
-            "val/translation_loss": val_t_loss_running
+            "val/translation_loss": val_t_loss_running,
+            "lr": scheduler.get_last_lr()[0]
         })
+        scheduler.step()
     run.finish()
 
     return
 
-# TODO: Determine metrics/results needed
 def train_model(model, ne, bs, lr):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
@@ -190,6 +194,7 @@ def train_model(model, ne, bs, lr):
             "smooth_l1_beta": translation_beta,
             "loss_lambda": loss_lambda,
             "rotation_loss": "symmetry_aware_chordal",
+            "lr_schedule": "cosine",
         }
     )
 
@@ -197,6 +202,8 @@ def train_model(model, ne, bs, lr):
     translation_criterion = nn.SmoothL1Loss(beta=translation_beta)
     rotation_criterion = SymmetryAwareChordalLoss().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # See train_baseline: decaying the LR stops the epoch-boundary weights wandering.
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=ne)
     train_loader, val_loader, _ = build_dataloader(bs)
     best_val_loss = 1.0e9
     for e in range(ne):
@@ -280,8 +287,10 @@ def train_model(model, ne, bs, lr):
             "train/translation_loss": train_t_loss_running,
             "val/total_loss": val_loss_running,
             "val/rotation_loss": val_rot_loss_running,
-            "val/translation_loss": val_t_loss_running
+            "val/translation_loss": val_t_loss_running,
+            "lr": scheduler.get_last_lr()[0]
         })
+        scheduler.step()
     run.finish()
 
     return

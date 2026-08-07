@@ -2,10 +2,11 @@ import numpy as np
 import copy
 import json
 import pickle
+import scipy
 from PIL import Image
 import imageio.v3 as iio
 import torch
-from torchvision.transforms.v2 import InterpolationMode
+from torchvision.transforms.v2 import InterpolationMode, ColorJitter, RandomErasing
 import torchvision.transforms.v2.functional as F
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 from pathlib import Path
@@ -20,10 +21,13 @@ class YCBVDataset(torch.utils.data.Dataset):
     # deterministic=True seeds the point sampling from the sample index, so a given
     # sample yields the same cloud on every pass. Validation and test must set it,
     # otherwise the metric being compared across epochs moves on its own.
-    def __init__(self, dataset, deterministic=False, num_points=1000, seed=0):
+    def __init__(self, dataset, deterministic=False, baseline=False, num_points=1000, seed=0):
         self.deterministic = deterministic
         self.num_points = num_points
         self.seed = seed
+        self.baseline = baseline
+        self.jitter = ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.02)
+        self.eraser = RandomErasing(p=0.7, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0)
 
         data_path = Path("data")
         if dataset == "train_real" or dataset == "train_pbr":
@@ -128,11 +132,30 @@ class YCBVDataset(torch.utils.data.Dataset):
         box_x_c = int(bbox_visib[0] + bbox_visib[2] / 2)
         box_y_c = int(bbox_visib[1] + bbox_visib[3] / 2)
         box_max_len = max(bbox_visib[2], bbox_visib[3])
+        if not self.deterministic and not self.baseline:
+            # Data augmentation
+            rng = np.random.default_rng()
+            box_max_len *= rng.uniform(0.9, 1.1)
+            box_max_len = int(box_max_len)
+            box_x_c += box_max_len * rng.uniform(-0.1, 0.1)
+            box_x_c = int(box_x_c)
+            box_y_c += box_max_len * rng.uniform(-0.1, 0.1)
+            box_y_c = int(box_y_c)
+
+            # Mask dilation
+            k = int(rng.integers(0, 4))
+            if k > 0:
+                mask_visib = scipy.ndimage.binary_dilation(
+                    mask_visib > 0, structure=np.ones((3, 3), bool), iterations=k
+                ).astype(np.uint8) * 255
+
         start_x = int(box_x_c - box_max_len / 2)
         start_y = int(box_y_c - box_max_len / 2)
         rgb = F.to_image(rgb) # Reshape to CHW
         rgb = F.crop(rgb, start_y, start_x, box_max_len, box_max_len)
         rgb = F.resize(rgb, size=[224, 224]) # Resize
+        if not self.deterministic and not self.baseline:
+            rgb = self.jitter(rgb) # Photometric jitter
         rgb = F.to_dtype(rgb, dtype=torch.float32, scale=True)
         rgb = F.normalize(rgb, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
@@ -142,6 +165,8 @@ class YCBVDataset(torch.utils.data.Dataset):
         mask_visib_transform = mask_visib_transform.bool().to(torch.float32)
 
         rgb = rgb * mask_visib_transform
+        if not self.deterministic and not self.baseline:
+            rgb = self.eraser(rgb) # Random erasing
         item["rgb"] = rgb # Cropped, reshaped to CHW, resized, scaled, normalized, float32
 
         depth = depth * self.dataset[i]["depth_scale"]
@@ -157,14 +182,23 @@ class YCBVDataset(torch.utils.data.Dataset):
         y_cam = ((y_im - cy) * z) / fy
         x_cam = ((x_im - cx) * z) / fx
         pointcloud = np.stack([x_cam, y_cam, z], axis=1) # Creates an array where each entry is a given x, y, z point
-        # Sample a fixed-size cloud. Sampling without replacement keeps the point set
-        # faithful to the object's surface; only clouds smaller than num_points have to
+        # Sample a fixed-size cloud. Sampling without replacement keeps the point set faithful to the object's surface; only clouds smaller than num_points have to
         # repeat points to reach the fixed size.
         rng = np.random.default_rng(self.seed + i if self.deterministic else None)
+        if not self.deterministic:
+            # Point dropout: cap how many distinct surface points the fixed-size draw
+            # below may span, leaving it to refill to num_points with repeats. The cap is
+            # a fraction of num_points, not of the source cloud - source clouds run ~12x
+            # num_points, so thinning them by any fraction still covers the draw and
+            # would be a no-op.
+            distinct = min(len(pointcloud), int(self.num_points * rng.uniform(0.3, 1.0)))
+            pointcloud = pointcloud[rng.choice(len(pointcloud), size=distinct, replace=False)]
         replace = len(pointcloud) < self.num_points
         indices = rng.choice(len(pointcloud), size=self.num_points, replace=replace)
         pointcloud = pointcloud[indices] # Shape: (num_points x 3)
         pointcloud *= 1e-3 # mm to m
+        if not self.deterministic:
+            pointcloud += rng.normal(loc=0.0, scale=0.005, size=pointcloud.shape) # Gaussian noise for augmentation
         centroid = pointcloud.mean(axis=0) # Centroid is required to center pointcloud for translation invariance; MLP is only concerned with shape not location
         pointcloud -= centroid
         item["pointcloud"] = torch.tensor(pointcloud, dtype=torch.float32)
@@ -189,7 +223,7 @@ class YCBVDataset(torch.utils.data.Dataset):
 
 
 def get_relevant_indices(train_set, test_set=[]):
-    #Train/val/test split: 64/16/12 scenes (70%/17%/13%); Train: scenes [0-47], [60-75], Val: [76-91], Test: [48-59]
+    #Train/val/test split: 64/16/12 scenes (70%/17%/13%); Train: scenes [0-47], [60-75], Val: [76-91], Test: [48-59] TODO: Update
     obj_ids = OBJ_IDS
     train_indices = []
     val_indices = []
@@ -214,9 +248,9 @@ def get_relevant_indices(train_set, test_set=[]):
     
     return train_indices, val_indices, test_indices
 
-def build_dataloader(bs):
-    train_set_real = YCBVDataset("train_real")
-    train_set_synt = YCBVDataset("train_pbr")
+def build_dataloader(bs, baseline=False):
+    train_set_real = YCBVDataset("train_real", baseline=baseline)
+    train_set_synt = YCBVDataset("train_pbr", baseline=baseline)
     train_set = ConcatDataset([train_set_real, train_set_synt])
     test_set = YCBVDataset("ycbv_test_all", deterministic=True)
 
@@ -230,8 +264,8 @@ def build_dataloader(bs):
     val_ds = Subset(train_set_real.deterministic_view(), val_indices)
     test_ds = Subset(test_set, test_indices)
 
-    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True, drop_last=True)
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=False)
-    test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False, num_workers=8, pin_memory=True, persistent_workers=True, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=False)
 
     return train_loader, val_loader, test_loader

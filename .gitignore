@@ -1,4 +1,5 @@
 data
+reports
 .env
 .venv
 wandb

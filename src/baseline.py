@@ -17,9 +17,9 @@ class GeometryEncoder(nn.Module):
 class RegressionHead(nn.Module):
     def __init__(self, input_size, output_size):
         super().__init__()
-        self.layer1 = nn.Linear(input_size, 256)
-        self.layer2 = nn.Linear(256, 64)
-        self.layer3 = nn.Linear(64, output_size)
+        self.layer1 = nn.Linear(input_size, 512)
+        self.layer2 = nn.Linear(512, 512)
+        self.layer3 = nn.Linear(512, output_size)
     
     def forward(self, x):
         x = F.relu(self.layer1(x))
