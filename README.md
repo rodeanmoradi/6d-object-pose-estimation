@@ -50,7 +50,7 @@ Python 3.10 or newer, plus:
 pip install torch torchvision numpy scipy pillow imageio wandb
 ```
 
-Training logs to Weights & Biases, so run `wandb login` first. The entity and project are set inside `train.py` and will need changing to your own.
+Training logs to wandb, so run `wandb login` first. The entity and project are set inside `train.py` and will need changing to your own.
 
 ### Data
 
