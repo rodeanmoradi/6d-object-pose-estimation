@@ -1,5 +1,7 @@
 # RGB-D Fusion for 6D Object Pose Estimation on YCB-Video
 
+<img width="456" height="644" alt="successes" src="https://github.com/user-attachments/assets/4704157a-1578-4e91-ab72-fc8872a2696c" />
+
 Given a single RGB-D frame and a segmentation of a known object, this project predicts the rigid transform (rotation R in SO(3) and translation t in R^3) that maps the object's CAD model into the camera frame. Reliable 6D pose is the prerequisite for robotic grasping, bin picking, and augmented reality, where a system has to know not just where an object is but how it is oriented.
 
 The model fuses a ResNet-18 appearance encoder with a PointNet geometry encoder and is compared against an RGB-only baseline on the BOP release of YCB-Video. Evaluation follows the official BOP'19 protocol.
