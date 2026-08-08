@@ -126,16 +126,8 @@ B is the RGB baseline, F is the final RGB-D model. A dagger marks a symmetric ob
 
 ## Limitations
 
-Worth being upfront about three things.
-
 The model consumes ground-truth masks and bounding boxes at test time, so the point cloud is the object's actual visible surface and its centroid is already close to the answer. Methods like PoseCNN and DenseFusion run on predicted segmentation, so the numbers here are not directly comparable to theirs.
 
 The RGB baseline is not a clean ablation. It differs from the final model in more than depth: it trains for 10 epochs instead of 20, uses Adam instead of AdamW with weight decay, and sees none of the augmentation. Depth is almost certainly the dominant factor given the size of the gap, but the comparison as it stands does not prove that on its own.
 
 There are no ablations for the symmetry-aware loss or the augmentation pipeline. Both are claimed to help based on training behaviour rather than a measured held-out delta.
-
-## Next steps
-
-Per-point fusion in the style of DenseFusion, or a pose refinement stage, would target the occlusion and face-flip failures directly. A trivial centroid-and-identity baseline would also be worth adding, since it would quantify exactly how much the network contributes on top of the oracle mask.
-6. Hodan et al. *BOP Challenge 2020 on 6D Object Localization.* ECCV Workshops 2020.
-7. He et al. *Deep Residual Learning for Image Recognition.* CVPR 2016.
