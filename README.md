@@ -137,13 +137,5 @@ There are no ablations for the symmetry-aware loss or the augmentation pipeline.
 ## Next steps
 
 Per-point fusion in the style of DenseFusion, or a pose refinement stage, would target the occlusion and face-flip failures directly. A trivial centroid-and-identity baseline would also be worth adding, since it would quantify exactly how much the network contributes on top of the oracle mask.
-
-## References
-
-1. Xiang et al. *PoseCNN: A Convolutional Neural Network for 6D Object Pose Estimation in Cluttered Scenes.* RSS 2018.
-2. Wang et al. *DenseFusion: 6D Object Pose Estimation by Iterative Dense Fusion.* CVPR 2019.
-3. Peng et al. *PVNet: Pixel-wise Voting Network for 6DoF Pose Estimation.* CVPR 2019.
-4. Qi et al. *PointNet: Deep Learning on Point Sets for 3D Classification and Segmentation.* CVPR 2017.
-5. Zhou et al. *On the Continuity of Rotation Representations in Neural Networks.* CVPR 2019.
 6. Hodan et al. *BOP Challenge 2020 on 6D Object Localization.* ECCV Workshops 2020.
 7. He et al. *Deep Residual Learning for Image Recognition.* CVPR 2016.
